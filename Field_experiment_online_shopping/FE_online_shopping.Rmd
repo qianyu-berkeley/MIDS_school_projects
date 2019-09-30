@@ -1,0 +1,285 @@
+---
+title: "MIDS W241 Field Experiment Class Project"
+author: "Michell Kim, Qian Yu, and Jason Hunsberger"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+#Section 1: Project Background and Previous Research
+
+Our experiment was focused on researching how much of an impact impulse buying incentives can have in an online sales setting. To perform this experiment we partnered with the online apparel retailer LuLaRoe. We contacted several LuLaRoe consultants and sought their participation in our study as confederates. In the normal course of LuLaRoe business, these consultants host online sales events via Facebook called "Pop-Ups". "Pop-ups" start at a designated time and are typically are open for 1-2 days. A pop-up ‘hostess’ (who can be different from the consultant) invites her friends, family, etc. to join a private Facebook group.
+Consultants post pictures of inventory, and customers add the comment 'Sold' on the picture to indicate a purchase. The ‘hostess’ earns rewards (discounts, free items) based on her friends’ purchases. Typically there is no overlap between separate private pop-ups.
+
+*Research Question*: Does incentivizing impulse buying increase profits in online sales?
+
+#Section 2:  Experiment Setup
+
+**Hypothesis**: Customers who are offered the incentive of free shipping within the first hour of the sale, will spend more money, resulting in higher profits for consultants.
+
+**Experiment Treatment**: At the start of each sale, the LuLaRoe consultant posted a message to her customers: "If you claim an item within the **first hour** of the pop-up, you will receive FREE Priority shipping for your entire order!"
+
+The treatment is applied via a Facebook message to all customers in that pop-up.
+
+We started our experiment by sending a recruitment invitation to more than 20 consultants. Of those 20, four volunteered to participate. Among the participants, two worked well with us, another scheduled pop-ups, but never provided data, and the fourth did not schedule any pop-ups during our experiment period. 
+
+Since treatment could only be applied at the pop-up level, we ended up needing to cluster our treatment. In an effort to mitigate some of the loss of statistical power that comes from clustering we also blocked our randomization at the consultant level. This meant that we randomized the assignment of treatment or control for each consultant's scheduled pop-ups. By blocking at the consultant level, we sought to address any inequities in average treatment effect that might arise as a result of differences between the consultants and the customers they attracted. 
+
+To collect our data, we provided each consultant with their own Google Sheet spreadsheet to fill in the data in which we were interested. This data included: total purchase amount of each customer, the number of items they purchased, and whether their purchase qualified for our free-shipping or other incentives.
+
+We used this data to calculate our primary variable of interest: profit. Since we did not have access to the LuLaRoe consultant's actual profit data, we used the following formula to calculate profit:
+
+\[Profit = PurchaseAmount - WholesalePrice - (FreeShipping \times CostOfShipping)\]
+
+Each of these terms were defined as follows:
+
+\begin{itemize}
+  \item
+  $WholesalePrice = (PurchaseAmount + Discount) \times 45\%$ 
+  \item
+  $FreeShipping = 1$ if the customer received free shipping, $0$ otherwise
+  \item
+  $CostOfShipping = \$6.50$ for USPS Priority mail
+  \item
+  $Discount = [amount]$ The amount of the discount, if any, for an individual sale
+\end{itemize}
+
+We were able to verify that our profit formula is very close to the actual profit with a LuLaRoe consult after the experiment.
+
+#Section 3: Experiment Measurement and Analysis
+<!--## Setting up the R environment
+### Load R Packages-->
+```{r, include=TRUE, results='hide', warning=FALSE, message=FALSE} 
+# load packages 
+library(dplyr)
+library(plyr)
+library(lmtest)
+library(sandwich)
+library(multiwayvcov)
+library(stargazer)
+library(data.table)
+library(foreign)
+library(ggplot2)
+```
+
+<!--### Load Experiment Data and Overview-->
+```{r,include=TRUE} 
+# Reading Data
+d <- read.csv("data/LLR Experiment Data Consolidated - final excl Andrea.csv")
+d$Consultant <- substr(d$EventID,1,2)
+dt <- data.table(d)
+```
+
+### Experiment Clusters and Covariates
+```{r,echo=TRUE} 
+# Create a table to display the clusters
+count(dt, c('Consultant','EventID', 'Large_event', 'Treat_offer'))
+```
+
+The table above shows that we had a total of 13 sales events. Each sales event was a cluster in our experiment design. 7 of the 13 events are treated. The **freq** columne in the table above indicates the number of customers in each event.
+
+We considered including 3 covariates during the experiment design: 
+
+1. **Consultant** is included as a covariate because we wanted to control for the possibility that consultants administer their sales events in different ways. These differences might have a considerable impact on customer purchase decisions and behaviors.
+
+2. **Large_event** is included as we discovered during the experiment that a pop-up could range from a few dozen subjects to thousands. This is relevant because the dynamic within larger events is different than in smaller events. In larger events, customers do not know each other and may be less engaged in the experience. In addition, if sales do not scale linearly with subject size we could have very different behaviors between small events and large events and we wanted to control for that effect.
+
+3. **Has_made_prev_purchase** would have been included as it would have allowed us to control better for people who already have a predisposition for purchasing products. This covariate turns out to be not useful since this information was only able to be collected for those customers who did make a purchase. It was not collected for customers who did not make a purchase. As a result, we will not use this covariate in our analysis.
+
+As seen below, there is no statistically significant difference between treatment and control groups for the two included covariates. This indicates that randomization was performed correctly and we do not have a covarite inbalance.
+
+```{r, echo=TRUE,results='asis'}
+events = unique(dt[,c(1:3,13)])
+#Covariate balance check
+check1 = lm(Treat_offer ~ Large_event, data=events)
+check2 = lm(Treat_offer ~ Consultant, data=events)
+stargazer(check1, check2, type="latex", keep.stat=c("n"), title="Covariate Balance Check")
+```
+
+
+### Conduct basic EDA on key parameters
+```{r, echo=TRUE, out.width= ".49\\linewidth", fig.width=5, fig.height=4,fig.show='hold'} 
+# Look at the distribution of profit and purchase amount when they are not 0
+dt[, .(purchase_rate = sum(Purchase_amount != 0)/length(Purchase_amount)), by = EventID]
+```
+
+The table above shows that the purchase rate in each sales event is very low for most events. Therefore, we might potentially need a lot of sales-events in order to get enough sales to adequately show the impact of our treatment. We plot the histogram of both purchase amount and profit below, showing only the non-zero purchases.
+
+```{r, echo=TRUE, out.width= ".49\\linewidth", fig.width=5, fig.height=4,fig.show='hold'}
+dt1 = dt[Profit != 0, ]
+dt2 = dt[Purchase_amount != 0, ] 
+
+ggplot(data=dt1, aes(Profit)) + 
+  geom_histogram(binwidth = 5, color="gray14", position="dodge") +
+  guides(fill=FALSE) + xlab("Profit per Subject") + ylab("Frequency") +
+  ggtitle("Histogram of Non-Zero Profit")
+
+ggplot(data=dt2, aes(Purchase_amount)) + 
+  geom_histogram(binwidth = 5, color="gray14", position="dodge") +
+  guides(fill=FALSE) + xlab("Purchase Amount per Subject") + ylab("Frequency") +
+  ggtitle("Histogram of Non-Zero Purchase Amount")
+
+```
+
+We observe in the charts above that our sales are generally small, with the majority of our sales at less than $\$50$. Correspondingly, we observe that the majority of profit data is less than $\$30$. This is within our expectations for an affordable online clothing retailer.
+
+### Regression Approach and Consideration of Covariates
+
+#### Profit Outcome Analysis
+
+Our analysis of our profit outcome started with a basic model shown below:
+
+\[Profit = \beta_0 + \beta_1Treatment + \epsilon\]
+
+We then use cluster-aware standard errors using each event and calculate our model coefficients.
+
+```{r, echo=TRUE} 
+# Analysis on profit
+# Without covariate
+m2 = dt[, lm(Profit~Treat_offer, data=dt)]
+m2$cluster.vcov = cluster.vcov(m2, ~ EventID)
+se.m2 = sqrt(diag(m2$cluster.vcov))
+coeftest(m2, m2$cluster.vcov)
+```
+
+None of the coefficients are statistically significant.
+
+Next, we analyze our basic model with our large-event covariate.
+
+```{r, echo=TRUE, results='asis'} 
+# With covariates, separated for clarity
+
+#CD had no large events
+KD_large = dt[Consultant=="KD" & Large_event==1,]
+KD_small = dt[Consultant=="KD" & Large_event==0,]
+CD=dt[Consultant=="CD",] 
+
+#KD Large Events
+mod_KDlarge2 = KD_large[, lm(Profit~Treat_offer, data=KD_large)]
+mod_KDlarge2$cluster.vcov = cluster.vcov(mod_KDlarge2, ~ EventID)
+se.mod_KDlarge2= sqrt(diag(mod_KDlarge2$cluster.vcov))
+pval.KDlarge2=round(coeftest(mod_KDlarge2, mod_KDlarge2$cluster.vcov)[2,4],2)
+
+#KD Small Events
+mod_KDsmall2 = KD_small[, lm(Profit ~ Treat_offer, data=KD_small)]
+mod_KDsmall2$cluster.vcov = cluster.vcov(mod_KDsmall2, ~ EventID)
+se.mod_KDsmall2= sqrt(diag(mod_KDsmall2$cluster.vcov))
+pval.KDsmall2=round(coeftest(mod_KDsmall2, mod_KDsmall2$cluster.vcov)[2,4],2)
+
+#CD All Events (All Small)
+mod_CD2 = CD[, lm(Profit ~ Treat_offer, data=CD)]
+mod_CD2$cluster.vcov = cluster.vcov(mod_CD2, ~ EventID)
+se.mod_CD2= sqrt(diag(mod_CD2$cluster.vcov))
+pval.CD2=round(coeftest(mod_CD2, mod_CD2$cluster.vcov)[2,4],2)
+
+stargazer(mod_KDlarge2, mod_KDsmall2, mod_CD2, type="latex", 
+        se=list(se.mod_KDlarge2,se.mod_KDsmall2,se.mod_CD2),
+        column.labels = c("KD Large Events", "KD Small Events", "CD Small Events"),
+        keep.stat=c("n","rsq","adj.rsq"),
+        add.lines=list(c("Treat p value", pval.KDlarge2,pval.KDsmall2, pval.CD2)),
+        title = "Profit Amount Models")
+```
+
+(Stargazer output may be displayed on the next page.)
+
+The regression table above shows that using our basic model, even when controlling for large events, we do not have any statistically significant results.
+
+Next, we will look at our full specification model to see if it shows a treatment effect of significance. 
+
+\[Profit = \beta_0 + \beta_1Treatment + \beta_2LargeEvent + \beta_3ConsultantKD + \beta_4LargeEvent*Treatment + \] 
+\[\beta_5ConsultantKD*Treatment + \epsilon\]
+
+
+```{r, echo=TRUE}
+full_model = lm(Profit ~ Treat_offer + Large_event + Consultant + Large_event*Treat_offer + Consultant*Treat_offer, data=dt)
+full_model$cluster.vcov = cluster.vcov(full_model, ~ EventID)
+se.full_model = sqrt(diag(full_model$cluster.vcov))
+pval.full=round(coeftest(full_model, full_model$cluster.vcov)[2,4],2)
+coeftest(full_model, full_model$cluster.vcov)
+```
+
+None of the coefficients in the table above are statistically significant.
+
+```{r, echo=TRUE, results='asis'} 
+
+stargazer(full_model, type="latex", 
+        se=list(se.full_model),
+        column.labels = c("All Events"),
+        keep.stat=c("n","rsq","adj.rsq"),
+        add.lines=list(c("Treat p value", pval.full)),
+        title = "Fully Specified Model")
+```
+
+(Stargazer output may be displayed on the next page.)
+
+The regression table above shows that in our full specification model, we start to see a mildly statistically significant effect for large events. This effect is negative = our treatment reduces profit.
+
+#### Purchase Amount Outcome Analysis
+For each consultant and event size: 
+\[PurchaseAmount = \beta_0 + \beta_1Treatment + \epsilon\]
+
+We used cluster-aware standard errors at the event level in our analysis of our purchase amount outcome. The first model does not include our covariates.
+
+```{r, echo=TRUE} 
+# Without covariate
+m1 = dt[, lm(Purchase_amount~Treat_offer, data=dt)]
+m1$cluster.vcov = cluster.vcov(m1, ~ EventID)
+se.m1 = sqrt(diag(m1$cluster.vcov))
+coeftest(m1, m1$cluster.vcov)
+```
+
+The table above shows there is no statisticaly significant impact on purchase amount with our treatment.
+
+Next, we analyze the purchase amount with a large event covariate.
+
+```{r, echo=TRUE} 
+# Analysis on purchase amount
+# With covariates, separated for clarity
+
+#KD Large Events
+mod_KDlarge = KD_large[, lm(Purchase_amount~Treat_offer, data=KD_large)]
+mod_KDlarge$cluster.vcov = cluster.vcov(mod_KDlarge, ~ EventID)
+se.mod_KDlarge= sqrt(diag(mod_KDlarge$cluster.vcov))
+pval.KDlarge=round(coeftest(mod_KDlarge, mod_KDlarge$cluster.vcov)[2,4],2)
+
+#KD Small Events
+mod_KDsmall = KD_small[, lm(Purchase_amount~Treat_offer, data=KD_small)]
+mod_KDsmall$cluster.vcov = cluster.vcov(mod_KDsmall, ~ EventID)
+se.mod_KDsmall= sqrt(diag(mod_KDsmall$cluster.vcov))
+pval.KDsmall=round(coeftest(mod_KDsmall, mod_KDsmall$cluster.vcov)[2,4],2)
+
+#CD All Events (All Small)
+mod_CD = CD[, lm(Purchase_amount~Treat_offer, data=CD)]
+mod_CD$cluster.vcov = cluster.vcov(mod_CD, ~ EventID)
+se.mod_CD= sqrt(diag(mod_CD$cluster.vcov))
+pval.CD=round(coeftest(mod_CD, mod_CD$cluster.vcov)[2,4],2)
+```
+
+
+```{r, echo=TRUE, results='asis'}
+stargazer(mod_KDlarge, mod_KDsmall, mod_CD, type="latex", 
+          column.labels = c("KD Large Events", "KD Small Events", "CD Small Events"),
+          se = list(se.mod_KDlarge,se.mod_KDsmall,se.mod_CD),
+          keep.stat = c("n","rsq","adj.rsq"),
+          add.lines = list(c("Treat p value", pval.KDlarge,pval.KDsmall, pval.CD)),
+          title = "Purchase Amount Models")
+```
+
+(Stargazer output may be displayed on the next page.)
+
+The stargazer table above shows that even when we control for large events, we still do not receive a statistically significant result.
+
+
+## Discussion of Analysis Results
+
+Based on the analysis, the treatment effect for the large events of consultant KD is positive at 0.024, negative for the small events at -4.012 for consultant KD and -0.196 for consultant CD. But all treatment effects are not statistically significant. The clustered standard error for KD large events is 0.035, 4.931 for KD small events and 1.89 for CD's small events. The correspondent p-value is 0.5 (KD large), 0.42 (KD small), and 0.92 (KD small). These errors and p-values are too large to reject the null hypothesis that our treatment has no effect. Thus, we cannot conclude whether the free-shipping offer at the first hour of a sales pop-up postively or negatively impacts the profit or purchase amount in a sale. 
+
+We think the following issues contributed to our inconclusive results.
+
+1. We are unable to determine the event size before the experiment. Some of our events had two orders of magnitude more subjects in them than others. This disparity in subject size causes inbalance in treatment and control sample size. We were able to mitigate this effect a bit by blocking at the consultant level, but that was unlikely to make up for the difference.
+
+2. Our event sample size is very small. Ultimately, we were only able to use data from 2 consultants. One consultant had nine events while the other had four. These 13 events were our only opportunities for randomization of treatment and control. And while the in cluster subject count was sometimes in the thousands, the statistical power of these observations was diminished. 
+
+3. Within each sales event, the sales volume is very low. This further contributed to statistically insignificant treatment effect.
+
+4. We also think there are potential intertemporal substitution effect. An subject who had made a purchase in the first event due to the incentive may not make another purchase with the same month because the sale items are apparel which is not fast-moving consumer goods.
