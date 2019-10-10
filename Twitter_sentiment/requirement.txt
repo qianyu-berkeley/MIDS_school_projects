@@ -1,0 +1,13 @@
+python==2.7
+psycopg2==2.7.6
+kafka
+pandas
+json
+textblob
+nltk
+gensim
+spacy
+re
+django
+re
+codecs

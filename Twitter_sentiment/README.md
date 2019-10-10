@@ -64,22 +64,7 @@
    bin/kafka-console-consumer.sh --zookeeper localhost:2181 --topic Twitter --from-beginning
 
 #### Data Analytics Set-up & steps to address Vader Package related issues
-   A. Install the following python packages first:
-   ```
-   1. pip install kafka
-   2. pip install pandas
-   3. pip install json
-   4. pip install textblob
-   5. pip install nltk
-   6. pip install gensim
-   7. pip install spacy
-   8. pip install re
-   9. pip install psycopg2
-   10. pip install django
-   11. pip install Ipython
-   12. pip install re
-   13. pip install codecs
-   ```
+   A. Install the following python packages in the requirement.txt
    B. Download Vader Sentiment Lexicon (vader_lexicon.txt) from this git page
    https://github.com/cjhutto/vaderSentiment/tree/master/vaderSentiment
 
